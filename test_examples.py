@@ -6,6 +6,8 @@ Run with: pytest --flaky-runs=10 -v
 import random
 import time
 
+import pytest
+
 
 # ---------------------------------------------------------------------------
 # Stable tests (always pass or always fail)
@@ -69,8 +71,6 @@ def test_order_dependent():
 # ---------------------------------------------------------------------------
 # Skipped test
 # ---------------------------------------------------------------------------
-
-import pytest
 
 @pytest.mark.skip(reason="not implemented yet")
 def test_future_feature():

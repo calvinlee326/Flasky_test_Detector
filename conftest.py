@@ -14,8 +14,6 @@ import time
 from collections import defaultdict
 from pathlib import Path
 
-import pytest
-
 
 # ---------------------------------------------------------------------------
 # CLI options
@@ -55,7 +53,7 @@ class FlakyTracker:
         self._start[nodeid] = time.perf_counter()
 
     def record_outcome(self, nodeid: str, outcome: str):
-        elapsed = time.perf_counter() - self._start.pop(nodeid, time.perf_counter())
+        elapsed = time.perf_counter() - self._start.pop(nodeid, 0.0)
         self.results[nodeid].append(outcome)
         self.durations[nodeid].append(round(elapsed, 4))
 
@@ -95,7 +93,7 @@ class FlakyTracker:
                 "failures": failures,
                 "skips": skips,
                 "flakiness_score": score,
-                "is_flaky": score > 0.0 and len(unique) > 1,
+                "is_flaky": score > 0.0,
                 "avg_duration_s": round(sum(durations) / len(durations), 4) if durations else 0,
             })
 
@@ -123,18 +121,16 @@ class FlakyPlugin:
     def __init__(self, tracker: FlakyTracker, runs: int):
         self.tracker = tracker
         self.runs = runs
-        # track how many times each test has been collected/queued
-        self._run_count: dict[str, int] = defaultdict(int)
 
     # Re-run each test item `runs` times by re-inserting it into the queue.
-    def pytest_collection_modifyitems(self, session, config, items):
+    def pytest_collection_modifyitems(self, session, config, items):  # noqa: ARG002
         expanded = []
         for item in items:
             for _ in range(self.runs):
                 expanded.append(item)
         items[:] = expanded
 
-    def pytest_runtest_logstart(self, nodeid, location):
+    def pytest_runtest_logstart(self, nodeid, location):  # noqa: ARG002
         self.tracker.record_start(nodeid)
 
     def pytest_runtest_logreport(self, report):
@@ -163,13 +159,15 @@ class FlakyPlugin:
 
 def pytest_configure(config):
     runs = config.getoption("--flaky-runs", default=5)
+    if runs < 2:
+        raise ValueError("--flaky-runs must be at least 2 (need 2+ runs to detect flakiness)")
     tracker = FlakyTracker(runs=runs)
     plugin = FlakyPlugin(tracker=tracker, runs=runs)
     config._flaky_tracker = tracker
     config.pluginmanager.register(plugin, "flaky_detector")
 
 
-def pytest_sessionfinish(session, exitstatus):
+def pytest_sessionfinish(session, exitstatus):  # noqa: ARG001
     config = session.config
     tracker: FlakyTracker = getattr(config, "_flaky_tracker", None)
     if tracker is None:

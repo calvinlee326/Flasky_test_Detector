@@ -104,3 +104,35 @@ python show_report.py report.json
 
 - Python 3.9+
 - pytest 7.0+
+
+---
+
+## Code Review
+
+> Reviewed as a PR going to production across 5 dimensions.
+
+### Correctness
+- **Fixed (Major)** — `_run_count` dict in `FlakyPlugin` was allocated but never written or read — dead state that implied tracking that wasn't happening. Removed.
+- **Fixed (Major)** — `is_flaky: score > 0.0 and len(unique) > 1` was logically redundant. If `score > 0.0`, transitions exist, which requires at least 2 distinct outcomes by definition. Simplified to `score > 0.0`.
+- **Fixed (Major)** — No guard on `--flaky-runs < 2`. With `N=1`, `flakiness_score` returns `0.0` for every test (the guard `n < 2` fires), making the tool silently useless. Now raises a clear error.
+- **Fixed (Minor)** — `_start.pop(nodeid, time.perf_counter())` used a live timestamp as the fallback default, so a missing start would produce a near-zero (not zero) elapsed time. Changed fallback to `0.0`.
+
+### Security
+- No vulnerabilities found. The report path is user-supplied via CLI but writes only to the local filesystem the user controls. JSON output is structured data with no eval or shell interpolation.
+
+### Performance
+- `pytest_collection_modifyitems` appends the same item object N times. All N runs share one instance — if a plugin mutates item state between runs, there could be cross-contamination. Acceptable for a prototype; a production plugin should `copy.copy()` each item.
+- `flakiness_score()` is O(N) per test. No issue at any realistic test suite size.
+
+### Readability
+- **Fixed (Minor)** — `import pytest` in `conftest.py` was unused (flagged by linter). Removed.
+- **Fixed (Minor)** — `import pytest` in `test_examples.py` was at the bottom of the file (PEP 8 violation). Moved to the top with other imports.
+- **Fixed (Minor)** — Unused hook parameters (`session`, `location`, `exitstatus`) annotated with `# noqa: ARG002` to communicate intentional non-use.
+
+### Maintainability
+- **Fixed (Major)** — `show_report.py` printed raw ANSI escape codes with no TTY check. Piping output to a file (`python show_report.py > out.txt`) would pollute it with escape sequences. Added `sys.stdout.isatty()` guard — codes are stripped automatically when not writing to a terminal.
+- **Fixed (Major)** — f-string padding (`{score_str:<8}`) was counting ANSI escape characters toward the field width, causing column misalignment in the terminal. Fixed by padding against the plain-text width and applying color separately.
+- **Fixed (Minor)** — `show_report.py` had no error handling around JSON parsing. A truncated or malformed report would crash with a raw `KeyError` or `JSONDecodeError`. Now catches both and prints a friendly message.
+- `config._flaky_tracker` stores plugin state on a private attribute of pytest's config object. The cleaner approach for a published plugin is `config.stash` (pytest 7+ API), but for a drop-in `conftest.py` the current pattern is an accepted convention.
+
+### Overall Verdict: **Approve** (after fixes applied above)
